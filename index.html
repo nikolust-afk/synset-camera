@@ -1,0 +1,482 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><style>:root{box-sizing:border-box}img{max-width:100%}</style></head><body><title>Synset Camera</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* One full-screen camera; every face gets a box, an ImageNet person label and its definition.
+   Controls stay hidden until the screen is tapped. The archive is a plain light page of cards. */
+:root {
+  color-scheme: dark;
+  --black: #000000;
+  --white: #ffffff;
+  --ink: #1d1d1d;
+  --muted: #8a8a84;
+  --rule: #e2e2de;
+  --paper: #f5f5f3;
+  --page: #ffffff;
+  --alert: #b8322a;
+  --shade: rgba(0, 0, 0, .66);
+  --sans: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--black); color: var(--white); font: 15px/1.4 var(--sans); overflow: hidden; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
+
+#stage { position: fixed; inset: 0; background: var(--black); }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: manipulation; }
+video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px; color: #e8e8e4; }
+.msg p { margin: 0; max-width: 34ch; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.btn-file { position: relative; overflow: hidden; background: var(--white); color: var(--ink); padding: 10px 16px; display: inline-block; }
+.btn-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0; }
+.flash { position: absolute; inset: 0; background: var(--white); opacity: 0; pointer-events: none; }
+.flash.go { animation: flash .35s ease-out; }
+@keyframes flash { from { opacity: .85 } to { opacity: 0 } }
+
+.controls { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px max(18px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(transparent, rgba(0,0,0,.55)); transition: opacity .25s; }
+.controls.off { opacity: 0; pointer-events: none; }
+.controls .side { flex: 1; display: flex; }
+.controls .side.r { justify-content: flex-end; }
+.shutter { width: 70px; height: 70px; border-radius: 50%; border: 4px solid var(--white); background: transparent; padding: 0; position: relative; flex-shrink: 0; }
+.shutter::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--white); }
+.shutter:active::after { inset: 8px; }
+.ghost { background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.6); color: var(--white); padding: 8px 14px; font-size: 14px; }
+.toast { position: absolute; left: 50%; top: max(16px, env(safe-area-inset-top, 0px)); transform: translateX(-50%); background: rgba(0,0,0,.7); color: var(--white); padding: 8px 14px; font-size: 14px; max-width: calc(100% - 32px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* archive */
+#arch { position: fixed; inset: 0; overflow: auto; background: var(--page); color: var(--ink); color-scheme: light; -webkit-user-select: text; user-select: text; }
+.arch-in { padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 32px max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 18px; }
+.arch-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.arch-acts { display: flex; gap: 20px; flex-wrap: wrap; }
+.arch-head h2 { margin: 0; font-size: 26px; color: #3d3d3d; }
+.arch-head h2 span { font-weight: normal; color: var(--muted); font-size: 18px; margin-left: 8px; font-variant-numeric: tabular-nums; }
+.link { background: none; border: 0; padding: 8px 0; color: #3d3d3d; font-weight: bold; text-decoration: underline; text-underline-offset: 3px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); gap: 18px; }
+.empty { border: 1px dashed var(--rule); padding: 32px 20px; text-align: center; color: var(--muted); }
+.card { margin: 0; padding: 0; border: 1px solid var(--rule); background: var(--paper); display: flex; flex-direction: column; text-align: left; width: 100%; color: var(--ink); }
+.card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #ddd; }
+.card .cap { padding: 10px 11px 13px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.card .lab { font-size: 16px; font-weight: bold; overflow-wrap: anywhere; }
+.card .def { font-size: 12.5px; color: #3c3c3c; }
+.card .meta { font: 10px/1.3 var(--mono); color: var(--muted); margin-top: 4px; }
+.card.big { max-width: 460px; }
+.card.big .cap { padding: 16px 16px 18px; gap: 6px; }
+.card.big .lab { font-size: 24px; }
+.card.big .def { font-size: 15px; }
+.card.big .meta { font-size: 11px; }
+.ov { position: fixed; inset: 0; background: var(--shade); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+.ov-box { background: var(--page); color: var(--ink); max-height: 100%; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; width: min(100%, 492px); box-sizing: border-box; }
+.ov-actions { display: flex; justify-content: space-between; gap: 10px; }
+.btn { background: var(--page); color: var(--ink); border: 1px solid #b9b9b4; padding: 9px 16px; }
+.btn-del { color: var(--alert); }
+.btn-del.armed { background: var(--alert); border-color: var(--alert); color: var(--white); }
+@media (prefers-reduced-motion: reduce) { .flash.go { animation: none; } .controls { transition: none; } }
+</style>
+
+<div id="stage">
+  <canvas id="view"></canvas>
+  <video id="video" playsinline muted autoplay></video>
+  <div class="msg" id="msg"><p id="msgText">Loading ImageNet…</p></div>
+  <div class="flash" id="flash"></div>
+  <div class="toast" id="toast" hidden></div>
+  <div class="controls off" id="controls">
+    <div class="side"><button class="ghost" id="flip">Switch camera</button></div>
+    <button class="shutter" id="shutter" aria-label="Capture the labelled faces"></button>
+    <div class="side r"><button class="ghost" id="openArch">Archive (<span id="count">0</span>)</button></div>
+  </div>
+</div>
+
+<section id="arch" hidden>
+  <div class="arch-in">
+    <div class="arch-head"><h2>Archive<span id="count2">0</span></h2><div class="arch-acts"><button class="link" id="exportArch" hidden>Export archive</button><button class="link" id="closeArch">Back to camera</button></div></div>
+    <div class="grid" id="grid"></div>
+  </div>
+</section>
+<div class="ov" id="ov" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.wasm.min.js"></script>
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const base = (p) => new URL(p, document.baseURI).href;
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ================= models ================= */
+let L = null, cfg = null, cls = null, det = null;
+const CS = 224, DW = 320, DH = 240, CROP_K = 2.6, CROP_DY = 0.45;
+async function fetchBytes(url, onProg) {
+  const r = await fetch(url); if (!r.ok) throw new Error(url.split("/").pop() + " (" + r.status + ")");
+  if (!r.body) return new Uint8Array(await r.arrayBuffer());
+  const rd = r.body.getReader(), parts = []; let got = 0;
+  for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); got += value.length; onProg && onProg(got); }
+  const out = new Uint8Array(got); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out;
+}
+function unb64(bytes) { const s = new TextDecoder().decode(bytes).replace(/\s+/g, ""), b = atob(s), o = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) o[i] = b.charCodeAt(i); return o; }
+async function loadParts(m, onProg) {
+  const raw = await Promise.all(m.parts.map((p, k) => fetchBytes(base("models/" + p), (g) => onProg(k, g))));
+  const bufs = raw.map((r) => m.encoding === "b64" ? unb64(r) : r);
+  const out = new Uint8Array(bufs.reduce((a, b) => a + b.length, 0)); let o = 0; for (const b of bufs) { out.set(b, o); o += b.length; } return out;
+}
+async function loadModels() {
+  try {
+    const [labels, man] = await Promise.all([fetch(base("labels.json")).then((r) => r.json()), fetch(base("models/model.json")).then((r) => r.json())]);
+    L = labels; cfg = man;
+    if (!window.ort) await new Promise((res, rej) => { const s = document.createElement("script"); s.src = base("ort/ort.wasm.min.js"); s.onload = res; s.onerror = () => rej(new Error("onnxruntime did not load")); document.head.appendChild(s); });
+    ort.env.wasm.wasmPaths = base("ort/"); ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false;
+    const all = [man.classifier, man.detector], total = all.reduce((a, m) => a + m.sizes.reduce((x, y) => x + y, 0), 0), got = {};
+    const prog = (tag) => (k, g) => { got[tag + k] = g; const s = Object.values(got).reduce((a, b) => a + b, 0); $("msgText").textContent = "Loading ImageNet… " + Math.round(100 * s / total) + "%"; };
+    const [cb, db] = await Promise.all([loadParts(man.classifier, prog("c")), loadParts(man.detector, prog("d"))]);
+    const opt = { executionProviders: ["wasm"], graphOptimizationLevel: "all" };
+    det = await ort.InferenceSession.create(db, opt);
+    cls = await ort.InferenceSession.create(cb, opt);
+    if (stream) { $("msg").hidden = true; run(); }
+    else if (!cameraPending) $("msgText").textContent = "The live camera is not available in this view.";
+  } catch (e) { console.error(e); $("msg").hidden = false; $("msgText").textContent = "The model could not load: " + (e.message || e); }
+}
+
+/* face detector (UltraFace RFB-320): letterboxed into 320x240 */
+const dCv = document.createElement("canvas"); dCv.width = DW; dCv.height = DH;
+const dCtx = dCv.getContext("2d", { willReadFrequently: true });
+async function detect(src, w, h) {
+  const s = Math.min(DW / w, DH / h), dw = w * s, dh = h * s, ox = (DW - dw) / 2, oy = (DH - dh) / 2;
+  dCtx.fillStyle = "#7f7f7f"; dCtx.fillRect(0, 0, DW, DH); dCtx.drawImage(src, 0, 0, w, h, ox, oy, dw, dh);
+  const d = dCtx.getImageData(0, 0, DW, DH).data, n = DW * DH, x = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) { const j = i * 4; x[i] = (d[j] - 127) / 128; x[n + i] = (d[j + 1] - 127) / 128; x[2 * n + i] = (d[j + 2] - 127) / 128; }
+  const out = await det.run({ [det.inputNames[0]]: new ort.Tensor("float32", x, [1, 3, DH, DW]) });
+  const sc = out.scores.data, bx = out.boxes.data, cand = [];
+  for (let i = 0; i < sc.length / 2; i++) {
+    const p = sc[i * 2 + 1]; if (p < 0.8) continue;
+    const x1 = (bx[i * 4] * DW - ox) / s, y1 = (bx[i * 4 + 1] * DH - oy) / s, x2 = (bx[i * 4 + 2] * DW - ox) / s, y2 = (bx[i * 4 + 3] * DH - oy) / s;
+    if (x2 - x1 < 8 || y2 - y1 < 8) continue;
+    cand.push({ x1, y1, x2, y2, p });
+  }
+  cand.sort((a, b) => b.p - a.p);
+  const keep = [];
+  for (const c of cand) if (keep.every((k) => iou(k, c) < 0.3)) keep.push(c);
+  return keep.slice(0, 12);
+}
+function iou(a, b) {
+  const ix = Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1)), iy = Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1)), i = ix * iy;
+  return i / ((a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - i);
+}
+
+/* classifier: ImageNet-21k person synsets, on a head-and-shoulders square around the face */
+const cCv = document.createElement("canvas"); cCv.width = CS; cCv.height = CS;
+const cCtx = cCv.getContext("2d", { willReadFrequently: true });
+function cropRect(b) { const h = b.y2 - b.y1, side = h * CROP_K; return { x: (b.x1 + b.x2) / 2 - side / 2, y: (b.y1 + b.y2) / 2 + CROP_DY * h - side / 2, s: side }; }
+async function classify(src, b) {
+  const r = cropRect(b);
+  cCtx.fillStyle = "#7f7f7f"; cCtx.fillRect(0, 0, CS, CS); cCtx.imageSmoothingQuality = "high";
+  cCtx.drawImage(src, r.x, r.y, r.s, r.s, 0, 0, CS, CS);
+  const d = cCtx.getImageData(0, 0, CS, CS).data, n = CS * CS, x = new Float32Array(3 * n), m = cfg.classifier.mean, sd = cfg.classifier.std;
+  for (let i = 0; i < n; i++) { const j = i * 4; x[i] = (d[j] / 255 - m[0]) / sd[0]; x[n + i] = (d[j + 1] / 255 - m[1]) / sd[1]; x[2 * n + i] = (d[j + 2] / 255 - m[2]) / sd[2]; }
+  const out = await cls.run({ [cls.inputNames[0]]: new ort.Tensor("float32", x, [1, 3, CS, CS]) });
+  const z = out[cls.outputNames[0]].data; let mx = -Infinity; for (const v of z) if (v > mx) mx = v;
+  const p = new Float32Array(z.length); let sum = 0; for (let i = 0; i < z.length; i++) { p[i] = Math.exp(z[i] - mx); sum += p[i]; }
+  for (let i = 0; i < p.length; i++) p[i] /= sum; return p;
+}
+const argmax = (p) => { let b = 0; for (let i = 1; i < p.length; i++) if (p[i] > p[b]) b = i; return b; };
+const topk = (p, k) => Array.from(p.keys()).sort((a, b) => p[b] - p[a]).slice(0, k);
+
+/* ================= tracking ================= */
+let tracks = [], nextId = 1;
+function updateTracks(dets, now) {
+  const used = new Set();
+  for (const t of tracks) {
+    let best = -1, bv = 0.15;
+    dets.forEach((d, i) => { if (!used.has(i)) { const v = iou(t.target, d); if (v > bv) { bv = v; best = i; } } });
+    if (best >= 0) { used.add(best); t.target = dets[best]; t.seen = now; t.hits++; }
+  }
+  dets.forEach((d, i) => { if (!used.has(i)) tracks.push({ id: nextId++, target: d, box: Object.assign({}, d), seen: now, born: now, hits: 1, probs: null, n: 0, lastCls: 0, label: -1 }); });
+  tracks = tracks.filter((t) => now - t.seen < 1000);
+}
+function pickTrack(now) {
+  let best = null, score = -Infinity;
+  for (const t of tracks) {
+    if (now - t.seen > 400) continue;
+    const wait = now - t.lastCls, need = t.n < 3 ? 0 : 1400;
+    if (wait < need) continue;
+    const s = (t.n === 0 ? 1e6 : 0) + wait;
+    if (s > score) { score = s; best = t; }
+  }
+  return best;
+}
+function absorb(t, p) {
+  if (!t.probs) t.probs = p; else for (let i = 0; i < p.length; i++) t.probs[i] = t.probs[i] * 0.55 + p[i] * 0.45;
+  t.n++; const a = argmax(t.probs);
+  if (t.label < 0 || t.probs[a] > t.probs[t.label] * 1.15) t.label = a;
+}
+
+/* ================= camera + loop ================= */
+let stream = null, facing = "user", cameraPending = true, still = null, archOpen = false, running = false;
+const video = $("video"), view = $("view"), vctx = view.getContext("2d");
+async function startCamera() {
+  cameraPending = true;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return noCamera();
+  try {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+    video.srcObject = stream; await video.play().catch(() => {});
+    cameraPending = false; still = null; tracks = [];
+    if (cls) { $("msg").hidden = true; run(); }
+  } catch (e) { console.warn(e); noCamera(); }
+}
+function noCamera() {
+  stream = null; cameraPending = false; $("flip").hidden = true; $("shutter").hidden = true; showControls(true);
+  $("msg").hidden = false;
+  $("msgText").innerHTML = "The live camera is not available in this view.";
+  if (!$("pick")) {
+    const row = document.createElement("div"); row.className = "row"; row.id = "pick";
+    row.innerHTML = '<label class="btn-file">Take photo<input type="file" id="takePhoto" accept="image/*" capture="user"></label><label class="btn-file">Choose photo<input type="file" id="choosePhoto" accept="image/*"></label>';
+    $("msg").appendChild(row);
+    for (const id of ["takePhoto", "choosePhoto"]) $(id).addEventListener("change", (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; fromFile(f); });
+  }
+}
+const mirror = () => !!stream && facing === "user";
+async function run() {
+  if (running) return; running = true;
+  while (stream && cls) {
+    if (archOpen || document.hidden || !video.videoWidth) { await sleep(200); continue; }
+    const w = video.videoWidth, h = video.videoHeight, now = performance.now();
+    try {
+      updateTracks(await detect(video, w, h), now);
+      const t = pickTrack(performance.now());
+      if (t) { const p = await classify(video, t.target); absorb(t, p); t.lastCls = performance.now(); }
+    } catch (e) { console.warn(e); }
+    await sleep(16);
+  }
+  running = false;
+}
+
+/* ================= drawing ================= */
+function fit() { const dpr = Math.min(window.devicePixelRatio || 1, 2); const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr); if (view.width !== W || view.height !== H) { view.width = W; view.height = H; } return dpr; }
+function wrap(ctx, text, maxW) {
+  const words = text.split(/\s+/), lines = []; let line = "";
+  for (const w of words) { const t = line ? line + " " + w : w; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; }
+  if (line) lines.push(line); return lines;
+}
+function frame() {
+  const dpr = fit(), W = view.width, H = view.height;
+  vctx.fillStyle = "#000"; vctx.fillRect(0, 0, W, H);
+  const src = still ? still.img : (stream && video.videoWidth ? video : null);
+  if (src) {
+    const sw = still ? still.w : video.videoWidth, sh = still ? still.h : video.videoHeight;
+    const s = still ? Math.min(W / sw, H / sh) : Math.max(W / sw, H / sh), dw = sw * s, dh = sh * s, ox = (W - dw) / 2, oy = (H - dh) / 2;
+    vctx.save(); if (mirror()) { vctx.translate(W, 0); vctx.scale(-1, 1); } vctx.drawImage(src, ox, oy, dw, dh); vctx.restore();
+    const map = (x) => mirror() ? W - (ox + x * s) : ox + x * s;
+    const now = performance.now();
+    const list = still ? still.tracks : tracks;
+    for (const t of list) {
+      if (!still) { for (const k of ["x1", "y1", "x2", "y2"]) t.box[k] += (t.target[k] - t.box[k]) * 0.5; }
+      if (!still && (now - t.seen > 700 || t.hits < 2)) continue;
+      const b = t.box, xa = map(b.x1), xb = map(b.x2), x1 = Math.min(xa, xb), x2 = Math.max(xa, xb), y1 = oy + b.y1 * s, y2 = oy + b.y2 * s;
+      if (x2 < 0 || x1 > W || y2 < 0 || y1 > H) continue;
+      vctx.lineWidth = 2 * dpr; vctx.strokeStyle = "#fff"; vctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      if (t.label < 0) continue;
+      const lab = L[t.label][1], def = L[t.label][2];
+      const fsc = Math.max(16, Math.min(24, (x2 - x1) / dpr / 8)), fs = Math.round(fsc * dpr), fd = Math.round(Math.max(13, fsc * 0.72) * dpr), pad = 9 * dpr;
+      const maxW = Math.min(Math.max(x2 - x1, 260 * dpr), 380 * dpr) - pad * 2;
+      vctx.font = "bold " + fs + "px Arial, Helvetica, sans-serif"; const ll = wrap(vctx, lab, maxW);
+      vctx.font = fd + "px Arial, Helvetica, sans-serif"; const dl = wrap(vctx, def, maxW);
+      const widest = Math.max(...ll.map((t) => (vctx.font = "bold " + fs + "px Arial", vctx.measureText(t).width)), ...dl.map((t) => (vctx.font = fd + "px Arial", vctx.measureText(t).width)));
+      const bw = widest + pad * 2, bh = pad * 2 + ll.length * fs * 1.15 + 4 * dpr + dl.length * fd * 1.3;
+      let bx = Math.min(Math.max(x1, 8 * dpr), W - bw - 8 * dpr), by = y2 + 6 * dpr;
+      if (by + bh > H - 8 * dpr) by = Math.max(8 * dpr, y1 - bh - 6 * dpr);
+      vctx.fillStyle = "rgba(255,255,255,.94)"; vctx.fillRect(bx, by, bw, bh);
+      vctx.fillStyle = "#111"; vctx.textBaseline = "top"; let ty = by + pad;
+      vctx.font = "bold " + fs + "px Arial, Helvetica, sans-serif"; for (const l of ll) { vctx.fillText(l, bx + pad, ty); ty += fs * 1.15; }
+      ty += 4 * dpr; vctx.fillStyle = "#444"; vctx.font = fd + "px Arial, Helvetica, sans-serif"; for (const l of dl) { vctx.fillText(l, bx + pad, ty); ty += fd * 1.3; }
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ================= capture ================= */
+const capCv = document.createElement("canvas"); capCv.width = 640; capCv.height = 640;
+const capCtx = capCv.getContext("2d");
+let busy = false;
+async function captureFaces(src, list, flip) {
+  const ready = list.filter((t) => t.label >= 0);
+  if (!ready.length) { toast("No labelled face in frame"); return; }
+  busy = true; let ok = 0, fail = "";
+  for (const t of ready) {
+    const r = cropRect(t.target || t.box);
+    capCtx.save(); capCtx.fillStyle = "#7f7f7f"; capCtx.fillRect(0, 0, 640, 640);
+    if (flip) { capCtx.translate(640, 0); capCtx.scale(-1, 1); }
+    capCtx.drawImage(src, r.x, r.y, r.s, r.s, 0, 0, 640, 640); capCtx.restore();
+    const p = t.probs, top = topk(p, 5), i = t.label;
+    const rec = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), createdAt: Date.now(),
+      wnid: L[i][0], label: L[i][1], gloss: L[i][2], conf: +p[i].toFixed(5),
+      top5: top.map((k) => ({ wnid: L[k][0], label: L[k][1], p: +p[k].toFixed(5) })),
+      readings: t.n, model: cfg.classifier.name
+    };
+    const dataUrl = capCv.toDataURL("image/jpeg", 0.86), blob = await new Promise((r2) => capCv.toBlob(r2, "image/jpeg", 0.86));
+    try { await store.add(rec, blob, dataUrl); ok++; } catch (e) { console.error(e); fail = String(e.message || e.code || e); }
+  }
+  busy = false;
+  toast(fail ? "Not saved: " + fail : (ok === 1 ? "Saved 1 card to the archive" : "Saved " + ok + " cards to the archive"));
+}
+function shoot() {
+  if (busy || !stream || !video.videoWidth) return;
+  const f = $("flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
+  const now = performance.now();
+  captureFaces(video, tracks.filter((t) => now - t.seen < 700), mirror());
+}
+async function fromFile(file) {
+  if (!file || !cls) return;
+  let img; try { img = await createImageBitmap(file, { imageOrientation: "from-image" }); }
+  catch { img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); }); }
+  const w = img.width || img.naturalWidth, h = img.height || img.naturalHeight;
+  $("msg").hidden = true; toast("Reading…");
+  const pick = $("pick"); if (pick && pick.parentElement.id === "msg") { pick.style.justifyContent = "flex-start"; $("controls").querySelector(".side").appendChild(pick); }
+  const dets = await detect(img, w, h), list = [];
+  for (const d of dets) { const t = { target: d, box: d, probs: null, n: 0, label: -1 }; absorb(t, await classify(img, d)); list.push(t); }
+  still = { img, w, h, tracks: list };
+  if (!list.length) { toast("No face found in this photo"); return; }
+  await captureFaces(img, list, false);
+}
+
+/* ================= controls ================= */
+let hideTimer = 0;
+function showControls(stay) {
+  $("controls").classList.remove("off"); clearTimeout(hideTimer);
+  if (!stay && stream) hideTimer = setTimeout(() => $("controls").classList.add("off"), 4000);
+}
+view.addEventListener("click", () => showControls(false));
+$("controls").addEventListener("click", () => showControls(false));
+let toastTimer = 0;
+function toast(t) { const el = $("toast"); el.textContent = t; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 3000); }
+$("shutter").onclick = (e) => { e.stopPropagation(); shoot(); showControls(false); };
+$("flip").onclick = (e) => { e.stopPropagation(); facing = facing === "user" ? "environment" : "user"; startCamera(); showControls(false); };
+$("openArch").onclick = (e) => { e.stopPropagation(); setArch(true); };
+$("closeArch").onclick = () => setArch(false);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCard(); else if (e.key === " " && !archOpen && $("ov").hidden) { e.preventDefault(); shoot(); } });
+
+/* ================= archive stores ================= */
+let rows = [], store = { canWrite: false, add: async () => { throw new Error("no archive in this view"); }, remove: async () => {} };
+function setRows(r) { rows = r.slice().sort((a, b) => b.createdAt - a.createdAt); $("count").textContent = rows.length; $("count2").textContent = rows.length; if (archOpen) renderArchive(); }
+const blobUrls = new Map();
+function imgSrc(r) {
+  const im = r.image || {};
+  if (im.assetId) return "/_blob/" + im.assetId;
+  if (im.file) return base(im.file);
+  if (im.dataUrl) return im.dataUrl;
+  if (im.blob) { if (!blobUrls.has(r.id)) blobUrls.set(r.id, URL.createObjectURL(im.blob)); return blobUrls.get(r.id); }
+  return "";
+}
+async function claudeStore() {
+  if (!(window.claude && typeof window.claude.use === "function")) return null;
+  const db = await window.claude.use("db"); if (!db) return null;
+  const [assets, user] = await Promise.all([window.claude.use("assets").catch(() => null), window.claude.use("user").catch(() => null)]);
+  let canWrite = true; try { if (user && user.can && user.can("data.write") === false) canWrite = false; } catch {}
+  const col = db.collection("labels");
+  col.orderBy("createdAt", "desc").limit(1000).onSnapshot((s) => setRows(s.docs.map((d) => Object.assign({ id: d.id }, d.data()))), (e) => console.warn(e));
+  const small = async (blob) => { const b = await createImageBitmap(blob), c = document.createElement("canvas"); c.width = 400; c.height = 400; c.getContext("2d").drawImage(b, 0, 0, 400, 400); return c.toDataURL("image/jpeg", 0.8); };
+  return {
+    canWrite,
+    async add(rec, blob) {
+      let image = null;
+      if (assets) { try { const a = await assets.upload(blob, { filename: rec.wnid + "-" + rec.id + ".jpg" }); image = { assetId: a.id }; } catch (e) { console.warn(e); } }
+      if (!image) image = { dataUrl: await small(blob) };
+      const doc = Object.assign({}, rec, { image }); await col.doc(rec.id).set(doc); return doc;
+    },
+    async remove(r) { await col.doc(r.id).delete(); if (assets && r.image && r.image.assetId) { try { await assets.delete(r.image.assetId); } catch {} } }
+  };
+}
+async function folderStore() {
+  const r = await fetch(base("api/captures"), { cache: "no-store" }); if (!r.ok) return null;
+  const j = await r.json(); if (!j.ok) return null; setRows(j.rows || []);
+  return {
+    canWrite: true,
+    async add(rec, blob, dataUrl) {
+      const o = await (await fetch(base("api/captures"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record: rec, image: dataUrl }) })).json();
+      if (!o.ok) throw new Error(o.error || "save failed"); setRows(rows.concat(o.record)); return o.record;
+    },
+    async remove(rec) { await fetch(base("api/captures/" + rec.id), { method: "DELETE" }); setRows(rows.filter((x) => x.id !== rec.id)); }
+  };
+}
+function idbStore() {
+  return new Promise((resolve) => {
+    let q; try { q = indexedDB.open("synset-camera-people", 1); } catch { return resolve(null); }
+    q.onupgradeneeded = () => q.result.createObjectStore("labels", { keyPath: "id" });
+    q.onerror = () => resolve(null);
+    q.onsuccess = () => {
+      const db = q.result, os = (m) => db.transaction("labels", m).objectStore("labels");
+      const all = os("readonly").getAll(); all.onsuccess = () => setRows(all.result || []);
+      resolve({
+        canWrite: true, exportable: true,
+        async add(rec, blob) { const d = Object.assign({}, rec, { image: { blob } }); await new Promise((ok, no) => { const w = os("readwrite").put(d); w.onsuccess = ok; w.onerror = () => no(w.error); }); setRows(rows.concat(d)); return d; },
+        async remove(rec) { await new Promise((ok) => { const w = os("readwrite").delete(rec.id); w.onsuccess = ok; w.onerror = ok; }); setRows(rows.filter((x) => x.id !== rec.id)); }
+      });
+    };
+  });
+}
+async function initStore() {
+  let s = null;
+  try { s = await claudeStore(); } catch (e) { console.warn(e); }
+  if (!s && location.protocol.startsWith("http")) { try { s = await folderStore(); } catch {} }
+  if (!s) s = await idbStore();
+  if (s) store = s;
+  $("exportArch").hidden = !(store.exportable);
+}
+/* export (browser-storage archive only): a zip of JPGs + index.json, same layout as the computer's captures folder */
+async function exportArchive() {
+  const btn = $("exportArch"); if (!rows.length) return;
+  btn.disabled = true; btn.textContent = "Preparing…";
+  try {
+    if (!window.JSZip) await new Promise((res, rej) => { const s = document.createElement("script"); s.src = base("lib/jszip.min.js"); s.onload = res; s.onerror = () => rej(new Error("zip library did not load")); document.head.appendChild(s); });
+    const zip = new JSZip(), index = [];
+    for (const r of rows) {
+      const name = "captures/" + r.id + ".jpg";
+      if (r.image && r.image.blob) zip.file(name, r.image.blob);
+      const rec = Object.assign({}, r, { image: { file: name } }); index.push(rec);
+    }
+    zip.file("captures/index.json", JSON.stringify(index.slice().reverse(), null, 1));
+    const blob = await zip.generateAsync({ type: "blob" });
+    const d = new Date(), stamp = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    const file = new File([blob], "synset-camera-archive-" + stamp + ".zip", { type: "application/zip" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch (e) { if (e.name !== "AbortError") throw e; } }
+    else { const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); }
+  } catch (e) { console.error(e); alert("Export failed: " + (e.message || e)); }
+  btn.disabled = false; btn.textContent = "Export archive";
+}
+$("exportArch").onclick = exportArchive;
+
+/* ================= archive view ================= */
+const fmt = (ms) => { const d = new Date(ms); return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }); };
+function cardHTML(r, big) {
+  const tag = big ? "figure" : "button";
+  return "<" + tag + ' class="card' + (big ? " big" : "") + '" data-id="' + esc(r.id) + '"><img alt="" src="' + esc(imgSrc(r)) + '"><span class="cap"><span class="lab">' + esc(r.label) + '</span><span class="def">' + esc(r.gloss) + "</span>" +
+    (big ? '<span class="meta">' + esc(r.wnid) + " · " + (r.conf * 100).toFixed(1) + "% · " + esc(fmt(r.createdAt)) + "</span>" : "") + "</span></" + tag + ">";
+}
+function renderArchive() { $("grid").innerHTML = rows.length ? rows.map((r) => cardHTML(r, false)).join("") : '<div class="empty">No captures yet. Each face you capture becomes a card here: the image, the ImageNet label, and its definition.</div>'; }
+function setArch(open) { archOpen = open; $("arch").hidden = !open; $("stage").hidden = open; if (open) renderArchive(); else showControls(false); }
+$("grid").addEventListener("click", (e) => { const b = e.target.closest("button.card"); if (b) { const r = rows.find((x) => x.id === b.dataset.id); if (r) openCard(r); } });
+function openCard(r) {
+  const ov = $("ov");
+  ov.innerHTML = '<div class="ov-box" role="dialog" aria-modal="true">' + cardHTML(r, true) + '<div class="ov-actions"><button class="btn" id="ovClose">Close</button>' + (store.canWrite ? '<button class="btn btn-del" id="ovDel">Delete</button>' : "") + "</div></div>";
+  ov.hidden = false; $("ovClose").onclick = closeCard; $("ovClose").focus();
+  const del = $("ovDel");
+  if (del) { let armed = false, tm = 0; del.onclick = async () => {
+    if (!armed) { armed = true; del.classList.add("armed"); del.textContent = "Tap again to delete"; tm = setTimeout(() => { armed = false; del.classList.remove("armed"); del.textContent = "Delete"; }, 3000); return; }
+    clearTimeout(tm); del.disabled = true; try { await store.remove(r); closeCard(); } catch { del.textContent = "Could not delete"; }
+  }; }
+}
+function closeCard() { $("ov").hidden = true; $("ov").innerHTML = ""; }
+$("ov").addEventListener("click", (e) => { if (e.target === $("ov")) closeCard(); });
+try { navigator.wakeLock && navigator.wakeLock.request("screen").catch(() => {}); } catch {}
+
+window.__synset = { get tracks() { return tracks; }, get rows() { return rows; }, get ready() { return !!cls; }, shoot, fromFile };
+loadModels(); startCamera(); initStore();
+})();
+</script>
+</body></html>
