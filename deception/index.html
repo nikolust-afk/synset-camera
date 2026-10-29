@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Deception Index</title>
+<style>
+/* Full-screen camera; neon verdict boxes; a small heat inset top-right; one question at a time along the bottom. Dark only, by choice. */
+:root {
+  color-scheme: dark;
+  --black: #000000;
+  --white: #f4f4f0;
+  --dim: #9a9a94;
+  --truth: #39ff14;
+  --lie: #ff1744;
+  --panel: rgba(0, 0, 0, .62);
+  --sheet: #0d0d0c;
+  --rule: #2a2a28;
+  --sans: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+[hidden] { display: none !important; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--black); color: var(--white); font: 15px/1.4 var(--sans); overflow: hidden; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+#heat { position: fixed; top: max(14px, env(safe-area-inset-top, 0px)); right: max(14px, env(safe-area-inset-right, 0px)); width: min(26vmin, 240px); aspect-ratio: 1; border: 1px solid rgba(255,255,255,.55); background: #000; }
+#heat canvas { width: 100%; height: 100%; display: block; }
+#heat .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 6px; font: 9px/1.3 var(--mono); letter-spacing: .04em; color: var(--white); background: rgba(0,0,0,.55); display: flex; justify-content: space-between; gap: 6px; }
+
+.qbar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; align-items: flex-end; gap: 20px;
+  padding: 18px max(20px, env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(transparent, rgba(0,0,0,.82) 45%); }
+.qtext { flex: 1; min-width: 0; }
+.qnum { font: 11px/1.3 var(--mono); letter-spacing: .12em; color: var(--dim); text-transform: uppercase; }
+.qtext h1 { margin: 6px 0 0; font-size: clamp(22px, 3.6vw, 38px); line-height: 1.15; font-weight: bold; text-wrap: balance; }
+.next { flex-shrink: 0; background: var(--white); color: #111; border: 0; padding: 14px 22px; font-weight: bold; font-size: 16px; }
+.next:active { background: #cfcfca; }
+.method-link { position: fixed; top: max(14px, env(safe-area-inset-top, 0px)); left: max(14px, env(safe-area-inset-left, 0px)); background: var(--panel); border: 1px solid rgba(255,255,255,.35); padding: 6px 10px; font: 11px var(--mono); letter-spacing: .06em; color: var(--white); }
+.msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; color: var(--white); }
+.msg p { margin: 0; max-width: 36ch; }
+
+.sheet { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: flex; justify-content: center; align-items: center; padding: 16px; z-index: 10; }
+.sheet-in { background: var(--sheet); border: 1px solid var(--rule); max-width: 820px; width: 100%; max-height: 100%; overflow: auto; padding: 20px 22px; -webkit-user-select: text; user-select: text; }
+.sheet h2 { margin: 0 0 4px; font-size: 20px; }
+.sheet p { margin: 0 0 12px; color: var(--dim); font-size: 13.5px; max-width: 70ch; }
+.sheet table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 6px 0 14px; }
+.sheet th, .sheet td { text-align: left; vertical-align: top; padding: 6px 8px 6px 0; border-top: 1px solid var(--rule); }
+.sheet th { font: 10.5px var(--mono); letter-spacing: .06em; color: var(--dim); text-transform: uppercase; font-weight: normal; }
+.sheet td.pts { font-family: var(--mono); white-space: nowrap; }
+.sheet .src { color: var(--dim); }
+.sheet .close { background: var(--white); color: #111; border: 0; padding: 9px 16px; font-weight: bold; }
+.tablewrap { overflow-x: auto; }
+
+.summary { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.72); padding: 20px; }
+.summary-in { text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.summary .big { font: bold clamp(44px, 9vw, 96px)/1 var(--mono); }
+.summary .big.lie { color: var(--lie); text-shadow: 0 0 18px var(--lie); }
+.summary .big.truth { color: var(--truth); text-shadow: 0 0 18px var(--truth); }
+.summary p { margin: 0; color: var(--dim); font: 14px var(--mono); }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<video id="video" playsinline muted autoplay></video>
+<div id="heat"><canvas id="heatCv" width="128" height="128"></canvas><div class="cap"><span>SIMULATED THERMAL</span><span id="heatVal"></span></div></div>
+<button class="method-link" id="methodBtn">METHOD</button>
+<div class="msg" id="msg"><p id="msgText">Loading face models…</p></div>
+<div class="qbar">
+  <div class="qtext"><div class="qnum" id="qnum">Question 1 / 16</div><h1 id="qtext"></h1></div>
+  <button class="next" id="next">Next question</button>
+</div>
+<div class="summary" id="summary" hidden><div class="summary-in">
+  <div class="qnum">Session result</div>
+  <div class="big" id="sumBig"></div>
+  <p id="sumLine"></p>
+  <button class="next" id="restart">Start again</button>
+</div></div>
+
+<div class="sheet" id="sheet" hidden><div class="sheet-in">
+  <h2>Method</h2>
+  <p>Every cue below is measured from an ordinary camera. None of them indicates lying. They come from systems that were funded and deployed as if they did. Where a source did not publish a point value, the value used here is marked as assigned by this piece.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Cue</th><th>Measured here as</th><th>Points</th><th>Source</th></tr></thead>
+    <tbody id="methodRows"></tbody>
+  </table></div>
+  <p>Verdict per question: risk = 100 × (1 − e^(−points ÷ 3)). DECEPTIVE when risk ≥ 55, otherwise TRUTHFUL. A question is flagged if it ends DECEPTIVE. This mirrors iBorderCtrl's per-question flags and 0–100 score. Its real weights are a trade secret (Court of Justice of the EU, 7 Sep 2023), so these are invented.</p>
+  <p>Heart rate from skin colour is known to be less accurate on darker skin. The thermal inset is not temperature: it maps brightness and redness to a heat palette.</p>
+  <button class="close" id="sheetClose">Close</button>
+</div></div>
+
+<script type="module">
+import { FilesetResolver, FaceLandmarker, HandLandmarker } from "./mp/vision_bundle.mjs";
+const $ = (id) => document.getElementById(id);
+const base = (p) => new URL(p, document.baseURI).href;
+
+/* ---------------- questions (16, as iBorderCtrl asked 16) ---------------- */
+const QUESTIONS = [
+  "What is your name?",
+  "Is it daytime right now?",
+  "What did you eat today?",
+  "Have you ever lied to someone you love?",
+  "Are you happy right now?",
+  "Have you ever taken something that wasn't yours?",
+  "Do you trust the people standing near you?",
+  "Is there something you have never told anyone?",
+  "Are you the person you say you are?",
+  "Do you like what you do for a living?",
+  "Have you ever pretended to be busy?",
+  "Would you lie to protect a friend?",
+  "Are you comfortable being watched?",
+  "Have you told the truth so far?",
+  "Do you believe this machine?",
+  "Is there anything you would like to declare?"
+];
+
+/* ---------------- cues ---------------- */
+const CUES = [
+  { id: "BLINK", label: "FAST EYE BLINK RATE", pts: 1, assigned: true, how: "more than 26 blinks per minute during the answer", src: "TSA SPOT checklist, signs of deception (leaked, The Intercept 2015)" },
+  { id: "GAZE_DOWN", label: "GAZING DOWN", pts: 1, assigned: true, how: "eyes looking down in over 35% of frames", src: "TSA SPOT checklist" },
+  { id: "WIDE_EYES", label: "WIDELY OPEN STARING EYES", pts: 1, assigned: true, how: "eyes wide in over 30% of frames", src: "TSA SPOT checklist" },
+  { id: "YAWN", label: "EXAGGERATED YAWNING", pts: 1, assigned: true, how: "jaw wide open for over 1 second", src: "TSA SPOT checklist" },
+  { id: "STARE", label: "COLD PENETRATING STARE", pts: 2, assigned: false, how: "no blink for 7 seconds while looking straight ahead", src: "TSA SPOT checklist (2 points, with arrogance and rigid posture)" },
+  { id: "RIGID", label: "RIGID POSTURE", pts: 2, assigned: false, how: "head almost still (under 1.2° of movement) for 5 seconds or more", src: "TSA SPOT checklist (2 points)" },
+  { id: "FIDGET", label: "FIDGETING", pts: 1, assigned: false, how: "head turning faster than 30° per second on average", src: "TSA SPOT checklist (1 point)" },
+  { id: "WHISTLE", label: "WHISTLING", pts: 1, assigned: false, how: "lips puckered for over 0.8 seconds", src: "TSA SPOT checklist (1 point)" },
+  { id: "TREMBLE", label: "TREMBLING", pts: 1, assigned: true, how: "fine jitter of the nose tip above threshold", src: "TSA SPOT checklist" },
+  { id: "COVER_MOUTH", label: "COVERS MOUTH WITH HAND", pts: 1, assigned: true, how: "a hand over the mouth for over 0.5 seconds", src: "TSA SPOT checklist, signs of deception" },
+  { id: "MICRO", label: "MICRO-EXPRESSION LEAKAGE", pts: 1, assigned: true, how: "brief spikes of brow-raise, lip-press, frown or squint", src: "iBorderCtrl ADDS: facial expression channel (weights secret)" },
+  { id: "GAZE_AVERT", label: "GAZE AVERSION", pts: 1, assigned: true, how: "eyes turned sideways in over 30% of frames", src: "iBorderCtrl ADDS: gaze channel (weights secret)" },
+  { id: "POSTURE", label: "POSTURE SHIFT", pts: 1, assigned: true, how: "head roll or pitch changes by more than 12°", src: "iBorderCtrl ADDS: posture channel (weights secret)" },
+  { id: "WARM", label: "PERIORBITAL WARMING", pts: 1, assigned: true, how: "skin around the eyes redder than at the start (simulated heat)", src: "Thermal lie detection, Nature 2002 (20 people)" },
+  { id: "PULSE", label: "ELEVATED PULSE", pts: 1, assigned: true, how: "heart rate from skin colour over 100 bpm", src: "Polygraph tradition; remote photoplethysmography" }
+];
+const CUE = Object.fromEntries(CUES.map((c) => [c.id, c]));
+$("methodRows").innerHTML = CUES.map((c) => "<tr><td>" + c.label + "</td><td>" + c.how + "</td><td class=\"pts\">+" + c.pts + (c.assigned ? " (assigned)" : "") + "</td><td class=\"src\">" + c.src + "</td></tr>").join("");
+
+/* ---------------- models ---------------- */
+const MODELS = {
+  face: ["https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", base("models/face_landmarker.task")],
+  hand: ["https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", base("models/hand_landmarker.task")]
+};
+async function fetchFirst(urls) {
+  for (const u of urls) { try { const r = await fetch(u); if (r.ok) return new Uint8Array(await r.arrayBuffer()); } catch {} }
+  throw new Error("model not found");
+}
+let face = null, hands = null;
+async function create(Kind, buf, opts) {
+  const order = /[?&]cpu/.test(location.search) ? ["CPU"] : ["GPU", "CPU"];
+  for (const delegate of order) {
+    try { return await Kind.createFromOptions(fileset, Object.assign({ baseOptions: { modelAssetBuffer: buf, delegate }, runningMode: "VIDEO" }, opts)); }
+    catch (e) { console.warn(delegate, e); }
+  }
+  throw new Error("could not start the face model");
+}
+let fileset = null;
+async function loadModels() {
+  fileset = await FilesetResolver.forVisionTasks(base("mp/wasm"));
+  const [fb, hb] = await Promise.all([fetchFirst(MODELS.face), fetchFirst(MODELS.hand)]);
+  face = await create(FaceLandmarker, fb, { numFaces: 4, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true, minFaceDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+  try { hands = await create(HandLandmarker, hb, { numHands: 4 }); } catch (e) { console.warn("hands off", e); }
+}
+
+/* ---------------- camera ---------------- */
+const video = $("video"), view = $("view"), ctx = view.getContext("2d");
+let stream = null;
+async function startCamera() {
+  stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  video.srcObject = stream; await video.play().catch(() => {});
+}
+
+/* ---------------- sampling canvas for colour (heat, pulse) ---------------- */
+const SW = 192;
+const sCv = document.createElement("canvas"), sCtx = sCv.getContext("2d", { willReadFrequently: true });
+let sData = null, sH = 0;
+function sampleFrame() {
+  const vw = video.videoWidth, vh = video.videoHeight; sH = Math.round(SW * vh / vw);
+  if (sCv.width !== SW || sCv.height !== sH) { sCv.width = SW; sCv.height = sH; }
+  sCtx.drawImage(video, 0, 0, SW, sH); sData = sCtx.getImageData(0, 0, SW, sH).data;
+}
+function roi(nx, ny, nr) {
+  const cx = nx * SW, cy = ny * sH, r = Math.max(1.5, nr * SW); let R = 0, G = 0, B = 0, n = 0;
+  for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(sH - 1, Math.ceil(cy + r)); y++)
+    for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(SW - 1, Math.ceil(cx + r)); x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 > r * r) continue; const i = (y * SW + x) * 4; R += sData[i]; G += sData[i + 1]; B += sData[i + 2]; n++;
+    }
+  return n ? { r: R / n, g: G / n, b: B / n } : null;
+}
+
+/* ---------------- tracks ---------------- */
+let tracks = [], nextId = 1, qStart = performance.now(), qIndex = 0;
+const bs = (cats, name) => { const c = cats.find((k) => k.categoryName === name); return c ? c.score : 0; };
+function boxOf(lm) { let x1 = 1, y1 = 1, x2 = 0, y2 = 0; for (const p of lm) { if (p.x < x1) x1 = p.x; if (p.y < y1) y1 = p.y; if (p.x > x2) x2 = p.x; if (p.y > y2) y2 = p.y; } return { x1, y1, x2, y2 }; }
+function iou(a, b) { const ix = Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1)), iy = Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1)), i = ix * iy; return i / ((a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - i); }
+function newTrack(box, now) { return { id: nextId++, box, seen: now, born: now, f: [], blinkOpen: true, blinks: [], lastBlink: now, base: null, pulse: [], bpm: 0, risk: 0, points: 0, fired: [], verdict: null, history: [] }; }
+function angles(m) { // column-major 4x4
+  const pitch = Math.atan2(m[6], m[10]) * 57.3, yaw = Math.asin(Math.max(-1, Math.min(1, -m[2]))) * 57.3, roll = Math.atan2(m[1], m[0]) * 57.3;
+  return { pitch, yaw, roll };
+}
+function resetQuestion(now) {
+  qStart = now;
+  for (const t of tracks) { t.f = []; t.blinks = []; t.lastBlink = now; t.base = null; t.points = 0; t.risk = 0; t.fired = []; t.verdict = null; }
+}
+
+function ingest(res, handRes, now) {
+  const faces = res.faceLandmarks || [], used = new Set();
+  const dets = faces.map((lm, i) => ({ lm, box: boxOf(lm), bs: (res.faceBlendshapes && res.faceBlendshapes[i]) ? res.faceBlendshapes[i].categories : [], m: (res.facialTransformationMatrixes && res.facialTransformationMatrixes[i]) ? res.facialTransformationMatrixes[i].data : null }));
+  for (const t of tracks) {
+    let best = -1, bv = 0.2;
+    dets.forEach((d, i) => { if (!used.has(i)) { const v = iou(t.box, d.box); if (v > bv) { bv = v; best = i; } } });
+    if (best >= 0) { used.add(best); update(t, dets[best], handRes, now); }
+  }
+  dets.forEach((d, i) => { if (!used.has(i)) { const t = newTrack(d.box, now); tracks.push(t); update(t, d, handRes, now); } });
+  tracks = tracks.filter((t) => now - t.seen < 900);
+}
+
+function update(t, d, handRes, now) {
+  t.box = d.box; t.seen = now; t.lm = d.lm;
+  const B = (n) => bs(d.bs, n), lm = d.lm;
+  const blink = (B("eyeBlinkLeft") + B("eyeBlinkRight")) / 2;
+  if (t.blinkOpen && blink > 0.5) { t.blinkOpen = false; t.blinks.push(now); t.lastBlink = now; }
+  else if (!t.blinkOpen && blink < 0.3) { t.blinkOpen = true; t.lastBlink = now; }
+  const a = d.m ? angles(d.m) : { pitch: 0, yaw: 0, roll: 0 };
+  // colour zones (sampling frame is unmirrored, same normalised coords as landmarks)
+  const fw = d.box.x2 - d.box.x1;
+  const peri = [roi(lm[133].x, lm[133].y, fw * 0.05), roi(lm[362].x, lm[362].y, fw * 0.05)].filter(Boolean);
+  const fore = roi(lm[151].x, lm[151].y, fw * 0.08);
+  const redness = peri.length ? peri.reduce((s, c) => s + c.r / (c.r + c.g + c.b + 1), 0) / peri.length : 0;
+  if (fore) { t.pulse.push([now, fore.g]); while (t.pulse.length && now - t.pulse[0][0] > 12000) t.pulse.shift(); }
+  // hand over mouth
+  let cover = false;
+  if (handRes && handRes.landmarks) {
+    const mx1 = Math.min(lm[61].x, lm[291].x), mx2 = Math.max(lm[61].x, lm[291].x), my1 = lm[13].y, my2 = lm[14].y;
+    const pw = (mx2 - mx1) * 0.6, ph = Math.max(my2 - my1, fw * 0.08);
+    for (const h of handRes.landmarks) for (const k of [4, 8, 12, 16, 20, 5, 9]) { const p = h[k]; if (p.x > mx1 - pw && p.x < mx2 + pw && p.y > my1 - ph && p.y < my2 + ph) cover = true; }
+  }
+  t.f.push({
+    t: now, blink, pitch: a.pitch, yaw: a.yaw, roll: a.roll,
+    down: (B("eyeLookDownLeft") + B("eyeLookDownRight")) / 2,
+    side: Math.max((B("eyeLookOutLeft") + B("eyeLookInRight")) / 2, (B("eyeLookInLeft") + B("eyeLookOutRight")) / 2),
+    wide: (B("eyeWideLeft") + B("eyeWideRight")) / 2, jaw: B("jawOpen"), pucker: B("mouthPucker"),
+    micro: Math.max(B("browInnerUp"), (B("mouthPressLeft") + B("mouthPressRight")) / 2, (B("mouthFrownLeft") + B("mouthFrownRight")) / 2, (B("eyeSquintLeft") + B("eyeSquintRight")) / 2),
+    nx: lm[4].x / fw, ny: lm[4].y / fw, redness, cover
+  });
+  if (!t.base && now - qStart > 1500 && t.f.length > 10) t.base = { redness: t.f.slice(-10).reduce((s, f) => s + f.redness, 0) / 10, roll: a.roll, pitch: a.pitch };
+}
+
+/* ---------------- scoring ---------------- */
+const frac = (arr, fn) => arr.length ? arr.filter(fn).length / arr.length : 0;
+function longestRun(arr, fn) { let best = 0, start = null; for (const f of arr) { if (fn(f)) { if (start === null) start = f.t; best = Math.max(best, f.t - start); } else start = null; } return best; }
+function estimateBpm(p) {
+  if (p.length < 60) return 0;
+  const t0 = p[0][0], T = (p[p.length - 1][0] - t0) / 1000; if (T < 8) return 0;
+  const fs = 15, n = Math.floor(T * fs), s = new Float32Array(n); let j = 0;
+  for (let i = 0; i < n; i++) { const tt = t0 + i * 1000 / fs; while (j < p.length - 2 && p[j + 1][0] < tt) j++; const [ta, va] = p[j], [tb, vb] = p[j + 1]; s[i] = va + (vb - va) * Math.min(1, Math.max(0, (tt - ta) / ((tb - ta) || 1))); }
+  const w = 15, d = new Float32Array(n); for (let i = 0; i < n; i++) { let m = 0, c = 0; for (let k = Math.max(0, i - w); k <= Math.min(n - 1, i + w); k++) { m += s[k]; c++; } d[i] = s[i] - m / c; }
+  let best = 0, bp = 0;
+  for (let bpm = 45; bpm <= 180; bpm += 1) { const f = bpm / 60; let re = 0, im = 0; for (let i = 0; i < n; i++) { const ph = 2 * Math.PI * f * i / fs; re += d[i] * Math.cos(ph); im += d[i] * Math.sin(ph); } const pw = re * re + im * im; if (pw > bp) { bp = pw; best = bpm; } }
+  return best;
+}
+function score(t, now) {
+  const F = t.f, dur = (now - qStart) / 1000;
+  if (dur < 3 || F.length < 20) { t.verdict = null; return; }
+  const fired = [];
+  const bpmin = t.blinks.length / (dur / 60);
+  if (dur > 6 && bpmin > 26) fired.push("BLINK");
+  if (frac(F, (f) => f.down > 0.45) > 0.35) fired.push("GAZE_DOWN");
+  if (frac(F, (f) => f.wide > 0.3) > 0.3) fired.push("WIDE_EYES");
+  if (longestRun(F, (f) => f.jaw > 0.55) > 1000) fired.push("YAWN");
+  if (now - t.lastBlink > 7000 && frac(F.slice(-60), (f) => f.side < 0.3 && f.down < 0.3) > 0.9) fired.push("STARE");
+  if (dur > 5) { const y = F.map((f) => f.yaw), p = F.map((f) => f.pitch); const sd = (a) => { const m = a.reduce((s, v) => s + v, 0) / a.length; return Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length); }; if (sd(y) < 1.2 && sd(p) < 1.2) fired.push("RIGID"); }
+  if (F.length > 10) { let sp = 0; for (let i = 1; i < F.length; i++) { const dt = (F[i].t - F[i - 1].t) / 1000 || 0.03; sp += Math.hypot(F[i].yaw - F[i - 1].yaw, F[i].pitch - F[i - 1].pitch) / dt; } if (sp / (F.length - 1) > 30) fired.push("FIDGET"); }
+  if (longestRun(F, (f) => f.pucker > 0.5) > 800) fired.push("WHISTLE");
+  { const r = F.slice(-45); if (r.length > 30) { let j = 0; for (let i = 2; i < r.length; i++) { const ax = r[i].nx - 2 * r[i - 1].nx + r[i - 2].nx, ay = r[i].ny - 2 * r[i - 1].ny + r[i - 2].ny; j += Math.hypot(ax, ay); } if (j / (r.length - 2) > 0.0045) fired.push("TREMBLE"); } }
+  if (longestRun(F, (f) => f.cover) > 500) fired.push("COVER_MOUTH");
+  { let spikes = 0; for (let i = 3; i < F.length; i++) if (F[i].micro - F[i - 3].micro > 0.25) { spikes++; i += 8; } if (spikes >= 2) fired.push("MICRO"); }
+  if (frac(F, (f) => f.side > 0.45) > 0.3) fired.push("GAZE_AVERT");
+  if (t.base && F.some((f) => Math.abs(f.roll - t.base.roll) > 12 || Math.abs(f.pitch - t.base.pitch) > 12)) fired.push("POSTURE");
+  if (t.base) { const now10 = F.slice(-10).reduce((s, f) => s + f.redness, 0) / Math.min(10, F.length); if ((now10 - t.base.redness) / t.base.redness > 0.04) fired.push("WARM"); }
+  t.bpm = estimateBpm(t.pulse); if (t.bpm > 100) fired.push("PULSE");
+  const pts = fired.reduce((s, id) => s + CUE[id].pts, 0);
+  t.points = pts; t.fired = fired; t.risk = Math.round(100 * (1 - Math.exp(-pts / 3)));
+  t.verdict = t.risk >= 55 ? "DECEPTIVE" : "TRUTHFUL";
+}
+
+/* ---------------- drawing ---------------- */
+const heatCv = $("heatCv"), hctx = heatCv.getContext("2d", { willReadFrequently: true });
+const LUT = (() => { // ironbow-like
+  const stops = [[0, 0, 0, 10], [0.25, 32, 0, 140], [0.45, 180, 0, 150], [0.62, 240, 70, 30], [0.8, 255, 180, 0], [1, 255, 255, 230]], out = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) { const v = i / 255; let k = 0; while (k < stops.length - 2 && v > stops[k + 1][0]) k++; const a = stops[k], b = stops[k + 1], u = (v - a[0]) / (b[0] - a[0]); for (let c = 0; c < 3; c++) out[i * 3 + c] = a[c + 1] + (b[c + 1] - a[c + 1]) * u; }
+  return out;
+})();
+function fit() { const dpr = Math.min(devicePixelRatio || 1, 2), W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr); if (view.width !== W || view.height !== H) { view.width = W; view.height = H; } return dpr; }
+const hStats = { lo: 0, hi: 0 };
+function drawHeat(main) {
+  const vw = video.videoWidth, vh = video.videoHeight, side = Math.min(vw, vh), N = heatCv.width;
+  hctx.save(); hctx.translate(N, 0); hctx.scale(-1, 1); hctx.drawImage(video, (vw - side) / 2, (vh - side) / 2, side, side, 0, 0, N, N); hctx.restore();
+  const img = hctx.getImageData(0, 0, N, N), d = img.data, raw = new Float32Array(N * N);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    const r = d[i], g = d[i + 1], b = d[i + 2], lum = (0.3 * r + 0.59 * g + 0.11 * b) / 255, skin = Math.max(0, Math.min(1, (r - b) / 90));
+    raw[j] = 0.45 * lum + 0.55 * skin;
+  }
+  const sorted = Float32Array.from(raw).sort(), lo = sorted[Math.floor(raw.length * 0.05)], hi = sorted[Math.floor(raw.length * 0.99)] + 1e-3;
+  hStats.lo = hStats.lo ? hStats.lo * 0.9 + lo * 0.1 : lo; hStats.hi = hStats.hi ? hStats.hi * 0.9 + hi * 0.1 : hi;
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    const v = Math.max(0, Math.min(255, Math.round(255 * (raw[j] - hStats.lo) / (hStats.hi - hStats.lo))));
+    d[i] = LUT[v * 3]; d[i + 1] = LUT[v * 3 + 1]; d[i + 2] = LUT[v * 3 + 2];
+  }
+  hctx.putImageData(img, 0, 0);
+  if (main && main.lm) {
+    const map = (p) => [N - ((p.x * vw - (vw - side) / 2) / side) * N, ((p.y * vh - (vh - side) / 2) / side) * N];
+    hctx.strokeStyle = "rgba(255,255,255,.9)"; hctx.lineWidth = 1;
+    for (const k of [133, 362]) { const [x, y] = map(main.lm[k]); hctx.beginPath(); hctx.arc(x, y, Math.max(3, (main.box.x2 - main.box.x1) * vw / side * N * 0.07), 0, 7); hctx.stroke(); }
+    const last = main.f[main.f.length - 1];
+    $("heatVal").textContent = main.base && last ? "EYE ZONE " + (((last.redness - main.base.redness) / main.base.redness) * 100 >= 0 ? "+" : "") + (((last.redness - main.base.redness) / main.base.redness) * 100).toFixed(1) + "%" : "";
+  } else $("heatVal").textContent = "";
+}
+function frame() {
+  const dpr = fit(), W = view.width, H = view.height;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  if (video.videoWidth) {
+    const vw = video.videoWidth, vh = video.videoHeight, s = Math.max(W / vw, H / vh), dw = vw * s, dh = vh * s, ox = (W - dw) / 2, oy = (H - dh) / 2;
+    ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1); ctx.drawImage(video, ox, oy, dw, dh); ctx.restore();
+    const now = performance.now();
+    let main = null;
+    for (const t of tracks) {
+      if (now - t.seen > 400) continue;
+      if (!main || (t.box.x2 - t.box.x1) > (main.box.x2 - main.box.x1)) main = t;
+      const pad = 0.12 * (t.box.x2 - t.box.x1);
+      const xa = W - (ox + (t.box.x1 - pad) * dw), xb = W - (ox + (t.box.x2 + pad) * dw), x1 = Math.min(xa, xb), x2 = Math.max(xa, xb);
+      const y1 = oy + (t.box.y1 - pad * 1.6) * dh, y2 = oy + (t.box.y2 + pad * 0.4) * dh;
+      const col = t.verdict === "DECEPTIVE" ? "#ff1744" : t.verdict === "TRUTHFUL" ? "#39ff14" : "#f4f4f0";
+      ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 16 * dpr; ctx.strokeStyle = col; ctx.lineWidth = 3 * dpr; ctx.strokeRect(x1, y1, x2 - x1, y2 - y1); ctx.restore();
+      const fs = Math.round(Math.max(16, Math.min(30, (x2 - x1) / dpr / 9)) * dpr);
+      ctx.font = "bold " + fs + "px ui-monospace, Menlo, monospace"; ctx.textBaseline = "bottom";
+      const label = t.verdict ? t.verdict + "  " + t.risk : "READING…";
+      const tw = ctx.measureText(label).width, lx = Math.min(Math.max(x1, 8 * dpr), W - tw - 20 * dpr), ly = Math.max(y1 - 6 * dpr, fs + 8 * dpr);
+      ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(lx - 6 * dpr, ly - fs - 4 * dpr, tw + 12 * dpr, fs + 8 * dpr);
+      ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 10 * dpr; ctx.fillStyle = col; ctx.fillText(label, lx, ly); ctx.restore();
+      if (t.fired.length) {
+        const fs2 = Math.round(Math.max(11, fs / dpr * 0.5) * dpr); ctx.font = fs2 + "px ui-monospace, Menlo, monospace"; ctx.textBaseline = "top";
+        let ty = y2 + 6 * dpr;
+        for (const id of t.fired) { const txt = CUE[id].label + " +" + CUE[id].pts; const w2 = ctx.measureText(txt).width; ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(x1, ty - 2 * dpr, w2 + 10 * dpr, fs2 + 5 * dpr); ctx.fillStyle = col; ctx.fillText(txt, x1 + 5 * dpr, ty); ty += fs2 + 6 * dpr; if (ty > H - 160 * dpr) break; }
+      }
+    }
+    drawHeat(main);
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ---------------- loop ---------------- */
+let lastVideoTime = -1, frameN = 0, handRes = null, lastScore = 0;
+function tick() {
+  if (face && video.videoWidth && video.currentTime !== lastVideoTime && $("summary").hidden) {
+    lastVideoTime = video.currentTime; const now = performance.now();
+    try {
+      sampleFrame();
+      const res = face.detectForVideo(video, now);
+      if (hands && frameN % 3 === 0) handRes = hands.detectForVideo(video, now);
+      ingest(res, handRes, now); frameN++;
+      if (now - lastScore > 400) { for (const t of tracks) score(t, now); lastScore = now; }
+    } catch (e) { console.warn(e); }
+  }
+  setTimeout(tick, 0);
+}
+
+/* ---------------- questions ---------------- */
+function showQuestion() { $("qnum").textContent = "Question " + (qIndex + 1) + " / " + QUESTIONS.length; $("qtext").textContent = QUESTIONS[qIndex]; }
+let session = [];
+$("next").onclick = () => {
+  const now = performance.now(), main = tracks.filter((t) => now - t.seen < 900).sort((a, b) => (b.box.x2 - b.box.x1) - (a.box.x2 - a.box.x1))[0];
+  session.push(main && main.verdict ? { verdict: main.verdict, risk: main.risk } : { verdict: null, risk: null });
+  if (qIndex + 1 >= QUESTIONS.length) return endSession();
+  qIndex++; showQuestion(); resetQuestion(now);
+};
+function endSession() {
+  const scored = session.filter((s) => s.verdict), flagged = scored.filter((s) => s.verdict === "DECEPTIVE").length;
+  const avg = scored.length ? Math.round(scored.reduce((s, x) => s + x.risk, 0) / scored.length) : 0;
+  const big = $("sumBig"); big.textContent = scored.length ? (flagged ? "DECEPTIVE" : "TRUTHFUL") : "NO FACE";
+  big.className = "big " + (flagged ? "lie" : "truth");
+  $("sumLine").textContent = "flagged " + flagged + " of " + session.length + " answers · mean risk " + avg + " / 100";
+  $("summary").hidden = false;
+}
+$("restart").onclick = () => { session = []; qIndex = 0; showQuestion(); resetQuestion(performance.now()); $("summary").hidden = true; };
+$("methodBtn").onclick = () => { $("sheet").hidden = false; };
+$("sheetClose").onclick = () => { $("sheet").hidden = true; };
+document.addEventListener("keydown", (e) => { if (e.key === "ArrowRight" || e.key === "Enter") $("next").click(); if (e.key === "Escape") $("sheet").hidden = true; });
+
+window.__deception = { get tracks() { return tracks; }, get ready() { return !!face; }, CUES, dbg: () => { const r = face.detectForVideo(video, performance.now() + 1); return { n: (r.faceLandmarks || []).length, vt: video.currentTime, w: video.videoWidth, frames: frameN, bs: r.faceBlendshapes && r.faceBlendshapes.length }; } };
+showQuestion();
+requestAnimationFrame(frame);
+(async () => {
+  try { await startCamera(); } catch (e) { $("msgText").textContent = "The camera is not available. Open this page in Safari and allow camera access."; return; }
+  try { await loadModels(); } catch (e) { console.error(e); $("msgText").textContent = "The face model could not load: " + (e.message || e); return; }
+  $("msg").hidden = true; resetQuestion(performance.now()); tick();
+  try { navigator.wakeLock && navigator.wakeLock.request("screen").catch(() => {}); } catch {}
+})();
+</script>
+</body>
+</html>
